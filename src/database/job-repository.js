@@ -1,6 +1,5 @@
 /**
  * Job Repository - Database Operations
- * Following SOLID principles - Single Responsibility
  */
 
 import Job from './job-model.js';
@@ -13,18 +12,16 @@ export class JobRepository {
       const job = new Job(jobData);
       const savedJob = await job.save();
       
-      console.log('✅ Job Created Successfully!');
-      console.log(`   📝 Name: ${savedJob.name}`);
-      console.log(`   🆔 ID: ${savedJob._id}`);
-      console.log(`   ⏰ Schedule: ${savedJob.cronSchedule}`);
-      console.log(`   📊 Type: ${savedJob.type}`);
-      console.log(`   📅 Next Run: ${savedJob.nextRun ? new Date(savedJob.nextRun).toLocaleString() : 'Not scheduled'}`);
-      
-      logger.info('Job created', { jobId: savedJob._id, name: savedJob.name });
+      logger.info('Job created successfully', {
+        jobId: savedJob._id,
+        name: savedJob.name,
+        schedule: savedJob.cronSchedule,
+        type: savedJob.type,
+        nextRun: savedJob.nextRun
+      });
       return savedJob;
     } catch (error) {
-      console.log('❌ Failed to create job:', error.message);
-      logger.error('Failed to create job', { error: error.message });
+      logger.error('Failed to create job', { error: error.message, stack: error.stack });
       throw error;
     }
   }
@@ -74,60 +71,10 @@ export class JobRepository {
     }
   }
 
-  // Update job
-  async update(id, updateData) {
-    try {
-      const job = await Job.findByIdAndUpdate(
-        id, 
-        { ...updateData, updatedAt: new Date() }, 
-        { new: true }
-      );
-      
-      if (!job) {
-        throw new Error('Job not found');
-      }
-      
-      console.log('🔄 Job Updated Successfully!');
-      console.log(`   📝 Name: ${job.name}`);
-      console.log(`   🆔 ID: ${job._id}`);
-      console.log(`   ⏰ Schedule: ${job.cronSchedule}`);
-      console.log(`   📊 Status: ${job.status}`);
-      
-      logger.info('Job updated', { jobId: id, name: job.name });
-      return job;
-    } catch (error) {
-      console.log('❌ Failed to update job:', error.message);
-      logger.error('Failed to update job', { id, error: error.message });
-      throw error;
-    }
-  }
-
-  // Delete job
-  async delete(id) {
-    try {
-      const job = await Job.findByIdAndDelete(id);
-      if (!job) {
-        throw new Error('Job not found');
-      }
-      
-      console.log('🗑️  Job Deleted Successfully!');
-      console.log(`   📝 Name: ${job.name}`);
-      console.log(`   🆔 ID: ${job._id}`);
-      console.log(`   📊 Type: ${job.type}`);
-      
-      logger.info('Job deleted', { jobId: id, name: job.name });
-      return job;
-    } catch (error) {
-      console.log('❌ Failed to delete job:', error.message);
-      logger.error('Failed to delete job', { id, error: error.message });
-      throw error;
-    }
-  }
-
   // Find active jobs for scheduling
   async findActiveJobs() {
     try {
-      const jobs = await Job.findActiveJobs();
+      const jobs = await Job.findActiveJobs(); // Uses static method from model
       logger.debug('Found active jobs', { count: jobs.length });
       return jobs;
     } catch (error) {
@@ -144,7 +91,7 @@ export class JobRepository {
         throw new Error('Job not found');
       }
       
-      await job.markCompleted();
+      await job.markCompleted(); // Uses instance method from model
       logger.info('Job marked as completed', { jobId: id, name: job.name });
       return job;
     } catch (error) {
@@ -161,7 +108,7 @@ export class JobRepository {
         throw new Error('Job not found');
       }
       
-      await job.markFailed();
+      await job.markFailed(); // Uses instance method from model
       logger.info('Job marked as failed', { jobId: id, name: job.name });
       return job;
     } catch (error) {
@@ -175,7 +122,7 @@ export class JobRepository {
     try {
       const job = await Job.findByIdAndUpdate(
         id,
-        { nextRun, updatedAt: new Date() },
+        { nextRun: nextRun, updatedAt: new Date() }, // Use your schema field 'nextRun'
         { new: true }
       );
       

@@ -1,60 +1,59 @@
-/**
- * Logger - Simple Logging Utility
- * Clean logging for intern level understanding
- */
+import winston from 'winston';
 
-class Logger {
-  constructor() {
-    this.level = process.env.LOG_LEVEL || 'info';
-    this.levels = {
-      error: 0,
-      warn: 1,
-      info: 2,
-      debug: 3
-    };
+const { combine, timestamp, printf, colorize, align } = winston.format;
+
+// Custom log format for console output
+const logFormat = printf(({ level, message, timestamp, instanceId, ...metadata }) => {
+  let log = `${timestamp} ${level}: ${message}`;
+  if (instanceId) {
+    log = `${timestamp} ${level} [${instanceId}]: ${message}`;
   }
-
-  shouldLog(level) {
-    return this.levels[level] <= this.levels[this.level];
+  // Add metadata if available and not empty
+  if (Object.keys(metadata).length > 0) {
+    log += ` ${JSON.stringify(metadata)}`;
   }
+  return log;
+});
 
-  formatMessage(level, message, meta = {}) {
-    const timestamp = new Date().toISOString();
-    const logEntry = {
-      timestamp,
-      level: level.toUpperCase(),
-      message,
-      ...meta
-    };
+let loggerInstance;
 
-    return JSON.stringify(logEntry);
-  }
+if (!loggerInstance) {
+  loggerInstance = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info', // Default to 'info'
+    format: combine(
+      timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+      logFormat
+    ),
+    transports: [
+      // ✅ CHANGED: Ensure only one console transport
+      // Only add console transport if not already present to prevent duplicates.
+      // This is a common issue with hot-reloading (like nodemon).
+      new winston.transports.Console({
+        format: combine(
+          colorize({ all: true }), // Colorize console output
+          align(),
+          logFormat
+        )
+      })
+    ],
+    // ✅ ADDED: Exit on error to prevent resource leaks in production
+    exitOnError: false, 
+  });
 
-  log(level, message, meta = {}) {
-    if (!this.shouldLog(level)) {
-      return;
-    }
-
-    const formattedMessage = this.formatMessage(level, message, meta);
-    console.log(formattedMessage);
-  }
-
-  error(message, meta = {}) {
-    this.log('error', message, meta);
-  }
-
-  warn(message, meta = {}) {
-    this.log('warn', message, meta);
-  }
-
-  info(message, meta = {}) {
-    this.log('info', message, meta);
-  }
-
-  debug(message, meta = {}) {
-    this.log('debug', message, meta);
+  // If we're in development, also log unhandled rejections
+  if (process.env.NODE_ENV !== 'production') {
+    loggerInstance.exceptions.handle(
+      new winston.transports.Console({
+        format: combine(colorize(), logFormat),
+      })
+    );
+    loggerInstance.rejections.handle(
+      new winston.transports.Console({
+        format: combine(colorize(), logFormat),
+      })
+    );
   }
 }
 
-// Export singleton instance
-export const logger = new Logger();
+export const logger = loggerInstance;
+

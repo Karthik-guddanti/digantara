@@ -1,6 +1,5 @@
 /**
  * Scheduler Manager - Main scheduler coordination
- * Following SOLID principles - Single Responsibility
  */
 
 import cron from 'node-cron';
@@ -17,7 +16,7 @@ export class SchedulerManager {
     this.instanceId = `scheduler-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     // Initialize sub-modules
-    this.jobExecutor = new JobExecutor(jobService, null);
+    this.jobExecutor = new JobExecutor(jobService); // Pass the service instance
     this.jobDiscovery = new JobDiscovery(jobService, this);
   }
 
@@ -26,24 +25,10 @@ export class SchedulerManager {
     logger.info('Starting job scheduler', { instanceId: this.instanceId });
     
     try {
-      // Redis removed; no initialization needed
-
       // Load and schedule all active jobs
       const activeJobs = await this.jobService.getActiveJobs();
       
-      console.log('🔍 Loading Active Jobs...');
-      console.log(`   📊 Found: ${activeJobs.length} active jobs`);
-      
-      if (activeJobs.length > 0) {
-        console.log('   📋 Jobs to schedule:');
-        activeJobs.forEach((job, index) => {
-          console.log(`      ${index + 1}. ${job.name} (${job.type}) - ${job.cronSchedule}`);
-        });
-      } else {
-        console.log('   ℹ️  No active jobs found. Ready to schedule new jobs!');
-      }
-      
-      logger.info('Found active jobs to schedule', { 
+      logger.info('Loading Active Jobs...', { 
         count: activeJobs.length,
         instanceId: this.instanceId 
       });
@@ -55,13 +40,10 @@ export class SchedulerManager {
       // Start periodic job discovery
       this.jobDiscovery.start();
       
-      console.log('⏰ Job Scheduler Started Successfully!');
-      console.log(`   🆔 Instance: ${this.instanceId}`);
-      console.log(`   📊 Scheduled Jobs: ${this.scheduledTasks.size}`);
-      console.log(`   🔄 Discovery Interval: ${this.jobDiscovery.discoveryInterval}ms`);
-      
       logger.info('Job scheduler started successfully', { 
-        instanceId: this.instanceId 
+        instanceId: this.instanceId,
+        scheduledJobs: this.scheduledTasks.size,
+        discoveryInterval: this.jobDiscovery.discoveryInterval
       });
     } catch (error) {
       logger.error('Failed to start scheduler', { 
@@ -95,12 +77,9 @@ export class SchedulerManager {
 
     try {
       // Validate cron expression
-      const interval = cronParser.parseExpression(job.cronSchedule);
-      const now = new Date();
-      const nextRun = interval.next();
-      
-      // Store the next run time
-      const nextRunTime = nextRun.toDate();
+      const options = { seconds: job.cronSchedule.split(' ').length === 6 };
+      const interval = cronParser.parseExpression(job.cronSchedule, options);
+      const nextRunTime = interval.next().toDate();
       
       const task = cron.schedule(job.cronSchedule, async () => {
         if (this.isShuttingDown) {
@@ -109,7 +88,8 @@ export class SchedulerManager {
           });
           return;
         }
-        await this.jobExecutor.executeJob(job, this.instanceId);
+        // ✅ FIXED: Correctly call execute with only the job object
+        await this.jobExecutor.execute(job);
       }, {
         scheduled: true,
         timezone: process.env.TZ || 'UTC'
@@ -117,35 +97,15 @@ export class SchedulerManager {
 
       this.scheduledTasks.set(job._id.toString(), task);
       
-      // Format times for display
-      const nextRunFormatted = nextRunTime.toLocaleString();
-      
-      console.log('\n' + '═'.repeat(60));
-      console.log(`⏰ JOB SCHEDULED: "${job.name}"`);
-      console.log('═'.repeat(60));
-      console.log(`📋 Job ID: ${job._id}`);
-      console.log(`📍 Job Type: ${job.type}`);
-      console.log(`⏰ Schedule: ${job.cronSchedule}`);
-      console.log(`⏭️  Next Run: ${nextRunFormatted}`);
-      console.log('═'.repeat(60) + '\n');
-      
-      logger.info('Job scheduled successfully', { 
+      logger.info(`JOB SCHEDULED: "${job.name}"`, { 
         jobId: job._id, 
-        name: job.name, 
+        jobType: job.type,
         schedule: job.cronSchedule,
-        nextRun: nextRunFormatted
+        nextRun: nextRunTime.toLocaleString()
       });
     } catch (error) {
-      console.log('\n' + '═'.repeat(60));
-      console.log(`❌ FAILED TO SCHEDULE JOB: "${job.name}"`);
-      console.log('═'.repeat(60));
-      console.log(`📋 Job ID: ${job._id}`);
-      console.log(`❌ Error: ${error.message}`);
-      console.log('═'.repeat(60) + '\n');
-      
-      logger.error('Failed to schedule job', { 
+      logger.error(`FAILED TO SCHEDULE JOB: "${job.name}"`, { 
         jobId: job._id, 
-        name: job.name, 
         error: error.message 
       });
     }
@@ -179,13 +139,9 @@ export class SchedulerManager {
     logger.info('Initiating scheduler shutdown', { instanceId: this.instanceId });
     this.isShuttingDown = true;
     
-    // Stop job discovery
     this.jobDiscovery.stop();
-    
-    // Stop all scheduled tasks
     this.stop();
     
-    // Wait a bit for any running jobs to complete
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     logger.info('Scheduler shutdown completed', { instanceId: this.instanceId });
@@ -216,4 +172,3 @@ export class SchedulerManager {
     return this.scheduledTasks.size;
   }
 }
-

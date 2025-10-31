@@ -1,6 +1,6 @@
 /**
  * Job Routes - Defines API paths
- * Following SOLID principles - Single Responsibility
+ * Simplified to only support GET (list/get) and POST (create).
  */
 
 import express from 'express';
@@ -24,19 +24,10 @@ const createJob = typeof controller.createJob === 'function'
   ? controller.createJob
   : (req, res) => res.status(501).json({ error: 'createJob not implemented' });
 
-const updateJob = typeof controller.updateJob === 'function'
-  ? controller.updateJob
-  : (req, res) => res.status(501).json({ error: 'updateJob not implemented' });
-
-const deleteJob = typeof controller.deleteJob === 'function'
-  ? controller.deleteJob
-  : (req, res) => res.status(501).json({ error: 'deleteJob not implemented' });
-
-// Routes
+// --- Routes ---
 router.get('/', listJobs);
 router.post('/', createJob);
 router.get('/:id', getJob);
-router.put('/:id', updateJob);
-router.delete('/:id', deleteJob);
+// 'updateJob' and 'deleteJob' routes have been removed.
 
 export default router;

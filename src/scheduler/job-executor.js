@@ -1,165 +1,82 @@
 /**
- * Job Executor - Handles individual job execution
- * Following SOLID principles - Single Responsibility
+ * Job Executor - Responsible for executing a single job.
  */
 
-import cronParser from 'cron-parser';
 import { logger } from '../core/logger.js';
+import { JobValidator } from '../database/job-validator.js';
+// import JobService from '../database/job-service.js'; // ❌ REMOVED: We get this via constructor
+
+const jobValidator = new JobValidator();
 
 export class JobExecutor {
   constructor(jobService) {
+    // ✅ FIXED: Correctly assign the injected service instance
+    if (!jobService) {
+      throw new Error('JobExecutor requires a JobService instance.');
+    }
     this.jobService = jobService;
-    this.lockTTL = parseInt(process.env.JOB_LOCK_TTL) || 30;
   }
 
-  // Execute a job with distributed locking
-  async executeJob(job, instanceId) {
-    // No distributed locking; single-instance safe
+  /**
+   * Executes a given job.
+   * @param {object} job - The job document to execute.
+   */
+  async execute(job) {
+    const jobName = job.name || job._id; // Use your schema field 'name'
 
     try {
-      // Proceed directly without Redis lock
+      // --- 1. Run the actual job logic ---
+      switch (job.type) { // Use your schema field 'type'
+        case 'email':
+          await this.sendEmail(job);
+          break;
+        case 'reminder':
+          await this.sendReminder(job);
+          break;
+        // Add other cases as needed
+        default:
+          await this.performGenericTask(job);
+          break;
+      }
 
-      const startTime = new Date();
-      
-      // Get the actual last run time from the job
-      const actualLastRun = job.lastRun ? new Date(job.lastRun).toLocaleString() : 'Never';
-      const currentRunTime = startTime.toLocaleString();
-      
-      console.log('\n' + '='.repeat(60));
-      console.log(`🚀 EXECUTING JOB: "${job.name}"`);
-      console.log('='.repeat(60));
-      console.log(`📋 Job ID: ${job._id}`);
-      console.log(`📍 Job Type: ${job.type}`);
-      console.log(`⏰ Schedule: ${job.cronSchedule}`);
-      console.log(`📅 Previous Last Run: ${actualLastRun}`);
-      console.log(`🕐 Current Run: ${currentRunTime}`);
-      
-      // Calculate next run time after execution
-      const nextRunTime = this.calculateNextRunTime(job.cronSchedule);
-      const nextRunFormatted = nextRunTime.toLocaleString();
-      console.log(`⏭️  Next Run: ${nextRunFormatted}`);
-      console.log('='.repeat(60) + '\n');
-      
-      logger.info('Executing job with distributed lock', { 
-        jobId: job._id, 
-        name: job.name, 
-        type: job.type,
-        schedule: job.cronSchedule,
-        previousLastRun: actualLastRun,
-        currentRun: currentRunTime,
-        nextRun: nextRunFormatted,
-        instanceId: instanceId
+      // --- 2. After successful execution, update timestamps ---
+      const lastRun = new Date(); // The time right now
+      const nextRun = jobValidator.calculateNextRunTime(job.cronSchedule); // Use 'cronSchedule'
+
+      // Update the database
+      await this.jobService.markJobCompleted(job._id); 
+      await this.jobService.updateNextRun(job._id, nextRun); // This updates 'nextRun'
+
+      logger.info(`Job Executed: ${job.name}`, {
+        jobId: job._id,
+        lastRun: lastRun.toISOString(),
+        nextRun: nextRun.toISOString()
       });
 
-      // Execute job logic based on job type
-      await this.executeJobLogic(job);
-      
-      // Update last run time and calculate next run time
-      await this.jobService.markJobCompleted(job._id);
-      await this.jobService.updateNextRun(job._id, nextRunTime);
-      
-      const endTime = new Date();
-      const duration = endTime - startTime;
-      
-      console.log('\n' + '='.repeat(60));
-      console.log(`✅ JOB COMPLETED: "${job.name}"`);
-      console.log(`⏱️  Duration: ${duration}ms`);
-      console.log(`🕐 Completed At: ${endTime.toLocaleString()}`);
-      console.log('='.repeat(60) + '\n');
-      
-      logger.info('Job completed successfully', { 
-        jobId: job._id, 
-        name: job.name, 
-        duration: `${duration}ms`,
-        completedAt: endTime.toLocaleString(),
-        nextRun: nextRunFormatted,
-        instanceId: instanceId
-      });
-      
     } catch (error) {
-      console.log(`❌ Job Failed: "${job.name}" - ${error.message}\n`);
-      
-      logger.error('Job execution failed', { 
-        jobId: job._id, 
-        name: job.name, 
-        error: error.message,
-        instanceId: instanceId
+      logger.error(`Job "${jobName}" (ID: ${job._id}) failed to execute: ${error.message}`, {
+        error: error.stack
       });
-      
-      // Mark job as failed
+      // Mark job as failed in DB
       await this.jobService.markJobFailed(job._id);
-    } finally {
-      // No Redis lock to release
     }
   }
 
-  // Execute job logic based on job type
-  async executeJobLogic(job) {
-    const { type, name, data } = job;
-    
-    switch (type) {
-      case 'email':
-        logger.info('Processing email job', { 
-          name, 
-          to: data.to || 'default@example.com',
-          subject: data.subject || 'Scheduled Email'
-        });
-        // Simulate email sending
-        await this.simulateDelay(1000, 2000);
-        break;
+  // --- Simulated Job Type Implementations ---
 
-      case 'data-processing':
-        logger.info('Processing data job', { 
-          name, 
-          records: data.records || 100 
-        });
-        // Simulate data processing
-        await this.simulateDelay(2000, 5000);
-        break;
-
-      case 'report':
-        logger.info('Processing report job', { 
-          name, 
-          reportType: data.reportType || 'Monthly Report',
-          period: data.period || '2024-01'
-        });
-        // Simulate report generation
-        await this.simulateDelay(3000, 6000);
-        break;
-
-      case 'notification':
-        logger.info('Processing notification job', { 
-          name, 
-          message: data.message || 'Scheduled Notification'
-        });
-        // Simulate notification sending
-        await this.simulateDelay(500, 1500);
-        break;
-
-      default:
-        logger.warn('Unknown job type encountered', { name, type });
-        break;
-    }
+  async sendEmail(job) {
+    logger.info(`Sending email for job "${job.name}"`, { jobId: job._id, data: job.data });
+    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate work
   }
 
-  // Simulate processing delay
-  async simulateDelay(minMs, maxMs) {
-    const delay = Math.random() * (maxMs - minMs) + minMs;
-    return new Promise(resolve => setTimeout(resolve, delay));
+  async sendReminder(job) {
+    const message = job.data?.message || `This is a reminder!`;
+    logger.info(`Reminder logic executed for "${job.name}"`, { message, jobId: job._id });
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate work
   }
 
-  // Calculate next run time from cron schedule
-  calculateNextRunTime(cronSchedule) {
-    try {
-      const interval = cronParser.parseExpression(cronSchedule);
-      return interval.next().toDate();
-    } catch (error) {
-      logger.error('Failed to calculate next run time', { 
-        cronSchedule, 
-        error: error.message 
-      });
-      throw new Error(`Invalid cron schedule: ${error.message}`);
-    }
+  async performGenericTask(job) {
+    logger.info(`Performing generic task for job "${job.name}"...`, { jobId: job._id, data: job.data });
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate work
   }
 }
-
